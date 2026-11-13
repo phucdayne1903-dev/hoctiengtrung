@@ -899,8 +899,8 @@
 
         <!-- Optional Custom Firebase Config (For Standalone Hosting) -->
         <details id="firebase-config-details" class="pt-1 text-xs">
-          <summary class="cursor-pointer font-bold text-slate-400 hover:text-accent-500 select-none">
-            <i class="fa-solid fa-gear mr-1"></i> Cấu hình Firebase cá nhân (nếu tự host web)
+          <summary class="cursor-pointer font-bold text-emerald-500 hover:text-emerald-400 select-none">
+            <i class="fa-solid fa-circle-check mr-1"></i> Đã kết nối Firebase: hoctiengtrung-db213
           </summary>
           <div class="mt-2.5 p-3 rounded-2xl bg-slate-100 dark:bg-[#0e131d] border border-slate-200 dark:border-slate-800 space-y-2">
             <p class="text-[11px] text-slate-400">Dán đối tượng JSON <code class="text-accent-500">firebaseConfig</code> từ Firebase Console để kết nối dự án của riêng bạn:</p>
@@ -1286,10 +1286,6 @@
     async function saveSettings() {
       await HanyuDB.putItem('meta', { key: 'settings', value: AppState.settings });
       if (window.CloudSync) window.CloudSync.scheduleSync();
-    }
-
-    async function saveSettings() {
-      await HanyuDB.putItem('meta', { key: 'settings', value: AppState.settings });
     }
 
     function updateDailyStreakCheck() {
@@ -4886,6 +4882,17 @@
       getDocs
     } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+    const DEFAULT_FIREBASE_CONFIG = {
+      apiKey: "AIzaSyA-is5ko9G8LofCMUWSFLslF_go2wWshNc",
+      authDomain: "hoctiengtrung-db213.firebaseapp.com",
+      databaseURL: "https://hoctiengtrung-db213-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "hoctiengtrung-db213",
+      storageBucket: "hoctiengtrung-db213.firebasestorage.app",
+      messagingSenderId: "776354197553",
+      appId: "1:776354197553:web:69d7e831d7f26b1a78a510",
+      measurementId: "G-3JLLBL49K9"
+    };
+
     const CHUNK_SIZE = 500; // 500 words per Firestore doc => 20,000 words = only 40 docs!
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'hanyu-bu-tai-nan';
 
@@ -4944,6 +4951,10 @@
             const meta = await HanyuDB.getAll('meta');
             const savedCfg = meta.find(m => m.key === 'custom_firebase_config');
             if (savedCfg && savedCfg.value) config = savedCfg.value;
+          }
+
+          if (!config) {
+            config = DEFAULT_FIREBASE_CONFIG;
           }
 
           if (!config || !config.apiKey) {
