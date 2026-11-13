@@ -277,7 +277,7 @@
             <div class="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
               <div id="capacity-bar" class="h-full bg-accent-500 rounded-full transition-all duration-500" style="width: 1%"></div>
             </div>
-            <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">IndexedDB siêu tốc • Sẵn sàng 20K từ</p>
+            <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">☁️ 100% Firebase Cloud • Không lưu trên máy</p>
           </div>
         </div>
       </div>
@@ -367,6 +367,24 @@
           </div>
         </div>
       </header>
+
+      <!-- Cloud-Only Required Login Banner (Shown when logged out) -->
+      <div id="cloud-only-banner" class="hidden bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-rose-500/15 border-b border-amber-500/30 px-4 sm:px-7 py-3">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5 text-xs sm:text-sm">
+            <span class="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-cloud"></i>
+            </span>
+            <div>
+              <span class="font-extrabold text-amber-400">Chế độ 100% Cloud (Đã tắt lưu cục bộ trên máy):</span>
+              <span class="text-slate-600 dark:text-slate-300"> Đăng nhập tài khoản để tải và lưu vĩnh viễn từ vựng, folder & tiến độ lên Firebase.</span>
+            </div>
+          </div>
+          <button onclick="openAuthModal()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-xs shadow-md transition shrink-0">
+            <i class="fa-solid fa-right-to-bracket mr-1"></i> Đăng nhập ngay
+          </button>
+        </div>
+      </div>
 
       <!-- Main Dynamic View Container -->
       <main id="main-content" class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-7 pb-24 lg:pb-10">
@@ -860,6 +878,30 @@
           </div>
         </div>
 
+        <!-- Sync Diagnostic & Firestore Rules Helper (Shown automatically if sync fails) -->
+        <div id="sync-diagnostic-box" class="hidden p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 space-y-2.5 text-xs">
+          <div class="flex items-start gap-2 text-rose-400 font-bold">
+            <i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0"></i>
+            <span id="sync-diagnostic-msg">Lỗi đồng bộ Firestore.</span>
+          </div>
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-[11px] text-slate-400">
+              <span>Dán vào <strong>Firebase Console → Firestore → Rules</strong>:</span>
+              <button type="button" onclick="copyFirestoreRules()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 font-bold">
+                <i class="fa-regular fa-copy mr-1"></i> Sao chép Rules
+              </button>
+            </div>
+            <pre id="firestore-rules-snippet" class="p-2.5 rounded-xl bg-[#0b0f17] text-emerald-300 font-mono text-[10px] overflow-x-auto leading-relaxed">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null &amp;&amp; request.auth.uid == userId;
+    }
+  }
+}</pre>
+          </div>
+        </div>
+
         <div class="grid grid-cols-2 gap-2.5 pt-1">
           <button type="button" onclick="triggerManualCloudSync()" class="py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-xs sm:text-sm shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition">
             <i class="fa-solid fa-rotate"></i> Đồng bộ ngay
@@ -932,10 +974,11 @@
           </button>
         </form>
 
-        <!-- Offline Continue Option -->
-        <button type="button" onclick="closeModal('auth-modal')" class="w-full py-2.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200 dark:hover:bg-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400 transition">
-          Tiếp tục dùng thử không cần đăng nhập (Offline)
-        </button>
+        <!-- Cloud-Only Notice -->
+        <div class="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-400 font-semibold text-center leading-relaxed">
+          <i class="fa-solid fa-shield-halved mr-1"></i>
+          Ứng dụng chạy <strong>100% trên Cloud</strong> (không lưu dữ liệu cục bộ trên máy). Vui lòng đăng nhập để lưu và đồng bộ từ vựng.
+        </div>
 
         <!-- Optional Custom Firebase Config (For Standalone Hosting) -->
         <details id="firebase-config-details" class="pt-1 text-xs">
@@ -1162,116 +1205,58 @@
     }
 
     /* =========================================================================
-       3. INDEXEDDB HIGH-CAPACITY STORAGE ENGINE (20,000+ WORDS)
+       3. CLOUD-ONLY IN-MEMORY ENGINE (ZERO LOCAL STORAGE ON DEVICE)
     ========================================================================= */
-    const DB_NAME = 'HanyuBuTaiNanDB';
-    const DB_VERSION = 1;
     const MAX_CAPACITY = 20000;
 
+    // Pure RAM-only store: never writes to IndexedDB or localStorage on the device
     const HanyuDB = {
-      db: null,
-      async open() {
-        return new Promise((resolve) => {
-          if (!window.indexedDB) {
-            resolve(null);
-            return;
+      mem: { folders: [], words: [], meta: [] },
+      async purgeLegacyLocalStorage() {
+        try {
+          if (window.indexedDB && typeof indexedDB.deleteDatabase === 'function') {
+            indexedDB.deleteDatabase('HanyuBuTaiNanDB');
           }
-          const req = indexedDB.open(DB_NAME, DB_VERSION);
-          req.onupgradeneeded = (e) => {
-            const db = e.target.result;
-            if (!db.objectStoreNames.contains('folders')) {
-              db.createObjectStore('folders', { keyPath: 'id' });
-            }
-            if (!db.objectStoreNames.contains('words')) {
-              const wordStore = db.createObjectStore('words', { keyPath: 'id' });
-              wordStore.createIndex('folderId', 'folderId', { unique: false });
-              wordStore.createIndex('mastered', 'mastered', { unique: false });
-            }
-            if (!db.objectStoreNames.contains('meta')) {
-              db.createObjectStore('meta', { keyPath: 'key' });
-            }
-          };
-          req.onsuccess = (e) => {
-            this.db = e.target.result;
-            resolve(this.db);
-          };
-          req.onerror = () => resolve(null);
-        });
+        } catch (e) {}
+        try {
+          ['hanyu_folders', 'hanyu_words', 'hanyu_meta'].forEach(k => localStorage.removeItem(k));
+        } catch (e) {}
+      },
+      async open() {
+        await this.purgeLegacyLocalStorage();
+        return true;
       },
       async getAll(storeName) {
-        if (!this.db) {
-          const raw = localStorage.getItem(`hanyu_${storeName}`);
-          return raw ? JSON.parse(raw) : [];
-        }
-        return new Promise((resolve) => {
-          const tx = this.db.transaction(storeName, 'readonly');
-          const req = tx.objectStore(storeName).getAll();
-          req.onsuccess = () => resolve(req.result || []);
-          req.onerror = () => resolve([]);
-        });
+        return this.mem[storeName] || [];
       },
       async putItem(storeName, item) {
-        if (!this.db) {
-          const all = await this.getAll(storeName);
-          const idx = all.findIndex(x => (x.id || x.key) === (item.id || item.key));
-          if (idx >= 0) all[idx] = item; else all.push(item);
-          try { localStorage.setItem(`hanyu_${storeName}`, JSON.stringify(all)); } catch (e) {}
-          return;
-        }
-        return new Promise((resolve) => {
-          const tx = this.db.transaction(storeName, 'readwrite');
-          tx.objectStore(storeName).put(item);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-        });
+        const list = this.mem[storeName] || [];
+        const keyProp = storeName === 'meta' ? 'key' : 'id';
+        const idx = list.findIndex(x => x[keyProp] === item[keyProp]);
+        if (idx >= 0) list[idx] = item; else list.push(item);
+        this.mem[storeName] = list;
       },
       async putMany(storeName, items) {
         if (!items || !items.length) return;
-        if (!this.db) {
-          const all = await this.getAll(storeName);
-          const map = new Map(all.map(x => [x.id, x]));
-          items.forEach(it => map.set(it.id, it));
-          try { localStorage.setItem(`hanyu_${storeName}`, JSON.stringify(Array.from(map.values()))); } catch (e) {}
-          return;
-        }
-        return new Promise((resolve) => {
-          const tx = this.db.transaction(storeName, 'readwrite');
-          const store = tx.objectStore(storeName);
-          for (let i = 0; i < items.length; i++) {
-            store.put(items[i]);
-          }
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-        });
+        const list = this.mem[storeName] || [];
+        const map = new Map(list.map(x => [x.id, x]));
+        items.forEach(it => map.set(it.id, it));
+        this.mem[storeName] = Array.from(map.values());
       },
       async deleteItem(storeName, id) {
-        if (!this.db) {
-          const all = await this.getAll(storeName);
-          const filtered = all.filter(x => x.id !== id);
-          try { localStorage.setItem(`hanyu_${storeName}`, JSON.stringify(filtered)); } catch (e) {}
-          return;
-        }
-        return new Promise((resolve) => {
-          const tx = this.db.transaction(storeName, 'readwrite');
-          tx.objectStore(storeName).delete(id);
-          tx.oncomplete = () => resolve();
-        });
+        this.mem[storeName] = (this.mem[storeName] || []).filter(x => x.id !== id);
       },
       async deleteWordsByFolder(folderId) {
-        const toDelete = AppState.words.filter(w => w.folderId === folderId).map(w => w.id);
-        if (!this.db) {
-          AppState.words = AppState.words.filter(w => w.folderId !== folderId);
-          try { localStorage.setItem('hanyu_words', JSON.stringify(AppState.words)); } catch (e) {}
-          return;
-        }
-        return new Promise((resolve) => {
-          const tx = this.db.transaction('words', 'readwrite');
-          const store = tx.objectStore('words');
-          toDelete.forEach(id => store.delete(id));
-          tx.oncomplete = () => resolve();
-        });
+        this.mem.words = (this.mem.words || []).filter(w => w.folderId !== folderId);
       }
     };
+
+    function requireCloudSignIn(actionLabel = 'lưu dữ liệu lên Cloud') {
+      if (window.CloudSync && window.CloudSync.isSignedIn()) return true;
+      showToast(`Vui lòng đăng nhập tài khoản để ${actionLabel}!`, 'warning');
+      openAuthModal();
+      return false;
+    }
 
     /* =========================================================================
        4. STARTER DATASET (45 RICH CHINESE WORDS ACROSS 3 LEVELS)
@@ -1390,45 +1375,34 @@
     /* =========================================================================
        6. INITIALIZATION & PERSISTENCE
     ========================================================================= */
+    function buildStarterLibrary() {
+      const folders = STARTER_FOLDERS.map(f => ({ ...f }));
+      const words = STARTER_WORDS.map((w, i) => ({
+        id: `w_init_${i}_${Date.now()}`,
+        folderId: w.folderId,
+        hanzi: w.hanzi,
+        pinyin: w.pinyin,
+        meaning: w.meaning,
+        pos: w.pos || 'Danh từ',
+        example: w.example || '',
+        note: '',
+        mastered: Boolean(w.mastered),
+        srsLevel: w.mastered ? 2 : 0,
+        nextReview: w.mastered ? Date.now() + 86400000 * 3 : Date.now(),
+        createdAt: Date.now() - i * 1000
+      }));
+      return { folders, words };
+    }
+
     async function initApp() {
+      // Purge any legacy local storage on the machine (100% Cloud mode)
       await HanyuDB.open();
 
-      // Load settings
-      const savedMeta = await HanyuDB.getAll('meta');
-      const settingsObj = savedMeta.find(m => m.key === 'settings');
-      if (settingsObj && settingsObj.value) {
-        AppState.settings = { ...AppState.settings, ...settingsObj.value };
-      }
-
-      // Check daily streak continuity
       updateDailyStreakCheck();
 
-      // Load folders & words
-      let folders = await HanyuDB.getAll('folders');
-      let words = await HanyuDB.getAll('words');
-
-      if (folders.length === 0 && words.length === 0) {
-        folders = STARTER_FOLDERS;
-        words = STARTER_WORDS.map((w, i) => ({
-          id: `w_init_${i}_${Date.now()}`,
-          folderId: w.folderId,
-          hanzi: w.hanzi,
-          pinyin: w.pinyin,
-          meaning: w.meaning,
-          pos: w.pos || 'Danh từ',
-          example: w.example || '',
-          note: '',
-          mastered: Boolean(w.mastered),
-          srsLevel: w.mastered ? 2 : 0,
-          nextReview: w.mastered ? Date.now() + 86400000 * 3 : Date.now(),
-          createdAt: Date.now() - i * 1000
-        }));
-        await HanyuDB.putMany('folders', folders);
-        await HanyuDB.putMany('words', words);
-      }
-
-      AppState.folders = folders;
-      AppState.words = words;
+      // Start with empty workspace until Firebase Cloud account loads user's library
+      AppState.folders = [];
+      AppState.words = [];
 
       applyThemeSettings();
       updateSidebarCounters();
@@ -2104,6 +2078,7 @@
 
     async function saveFolderForm(e) {
       e.preventDefault();
+      if (!requireCloudSignIn('tạo hoặc sửa Folder')) return;
       const id = document.getElementById('folder-id-input').value;
       const name = document.getElementById('folder-name-input').value.trim();
       const description = document.getElementById('folder-desc-input').value.trim();
@@ -2524,6 +2499,7 @@
     }
 
     async function saveBulkRows() {
+      if (!requireCloudSignIn('lưu từ vựng mới')) return;
       const folderId = document.getElementById('bulk-target-folder').value || AppState.folders[0].id;
       const valid = bulkDraftRows.filter(r => r.hanzi.trim() && r.meaning.trim());
       if (valid.length === 0) {
@@ -2723,6 +2699,7 @@
     }
 
     async function confirmExcelImport() {
+      if (!requireCloudSignIn('nhập từ vựng từ Excel')) return;
       const folderId = document.getElementById('excel-target-folder').value || AppState.folders[0].id;
       const skipDups = document.getElementById('excel-skip-duplicates').checked;
       const existingHanzi = new Set(AppState.words.filter(w => w.folderId === folderId).map(w => w.hanzi));
@@ -2773,6 +2750,7 @@
     }
 
     async function seedStressTestWords() {
+      if (!requireCloudSignIn('nạp từ vựng mẫu')) return;
       const folderId = AppState.folders[0].id;
       const available = MAX_CAPACITY - AppState.words.length;
       const count = Math.min(1000, available);
@@ -4670,35 +4648,40 @@
       const sidebarCard = document.getElementById('sidebar-auth-card');
       const headerSlot = document.getElementById('header-auth-slot');
 
+      const cloudBanner = document.getElementById('cloud-only-banner');
+      if (cloudBanner) {
+        cloudBanner.classList.toggle('hidden', Boolean(isSignedIn));
+      }
+
       if (!isSignedIn) {
         if (sidebarCard) {
           sidebarCard.innerHTML = `
             <div class="flex items-center gap-2.5">
-              <div class="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-slate-500 text-base shrink-0">
-                <i class="fa-solid fa-user-astronaut"></i>
+              <div class="w-10 h-10 rounded-full bg-amber-500/15 text-amber-400 flex items-center justify-center text-base shrink-0">
+                <i class="fa-solid fa-cloud-lock"></i>
               </div>
               <div class="sidebar-label min-w-0 flex-1">
-                <p class="text-xs font-extrabold truncate">Khách (Lưu trên máy)</p>
-                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                  💾 Lưu cục bộ
+                <p class="text-xs font-extrabold truncate">Chưa đăng nhập Cloud</p>
+                <span class="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400">
+                  ☁️ Bắt buộc đăng nhập để lưu
                 </span>
               </div>
             </div>
             <button onclick="openAuthModal()" class="sidebar-label w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-xs shadow-md shadow-orange-500/20 flex items-center justify-center gap-1.5 transition active:scale-98">
-              <i class="fa-solid fa-cloud-arrow-up"></i>
-              <span>Đăng nhập / Đồng bộ Cloud</span>
+              <i class="fa-solid fa-right-to-bracket"></i>
+              <span>Đăng nhập Cloud ngay</span>
             </button>
           `;
         }
 
         if (headerSlot) {
           headerSlot.innerHTML = `
-            <span class="hidden xl:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-xs font-bold">
-              💾 Lưu cục bộ
+            <span class="hidden xl:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/15 text-amber-400 text-xs font-bold">
+              ☁️ 100% Cloud
             </span>
             <button onclick="openAuthModal()" class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-extrabold text-xs shadow-md shadow-orange-500/20 transition active:scale-95">
               <i class="fa-solid fa-cloud-arrow-up"></i>
-              <span class="hidden sm:inline">Đăng nhập / Đồng bộ Cloud</span>
+              <span class="hidden sm:inline">Đăng nhập Cloud</span>
             </button>
           `;
         }
@@ -4780,6 +4763,16 @@
           const modalBadge = document.getElementById('auth-modal-sync-badge');
           if (modalBadge) {
             modalBadge.textContent = syncStatus === 'syncing' ? '🔄 Đang đồng bộ...' : syncStatus === 'error' ? '⚠️ Lỗi đồng bộ' : '☁️ Đã đồng bộ Cloud';
+          }
+          const diagBox = document.getElementById('sync-diagnostic-box');
+          const diagMsg = document.getElementById('sync-diagnostic-msg');
+          if (diagBox && diagMsg) {
+            if (syncStatus === 'error' && cs && cs.lastErrorMsg) {
+              diagMsg.textContent = cs.lastErrorMsg;
+              diagBox.classList.remove('hidden');
+            } else {
+              diagBox.classList.add('hidden');
+            }
           }
         } else {
           loggedPanel.classList.add('hidden');
@@ -4866,6 +4859,22 @@
 
     async function triggerManualCloudSync() {
       if (window.CloudSync) await window.CloudSync.pushAllToCloud(true);
+    }
+
+    function copyFirestoreRules() {
+      const rules = `rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}`;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(rules).then(() => {
+          showToast('Đã sao chép Firestore Rules! Hãy dán vào Firebase Console → Firestore → Rules.', 'success');
+        }).catch(() => {});
+      }
     }
 
     async function saveCustomFirebaseConfig() {
@@ -5050,12 +5059,11 @@
     window.addEventListener('DOMContentLoaded', initApp);
   </script>
 
-  <!-- Firebase v11.6.1 Modular SDK (Authentication & Cloud Firestore Chunk Sync) -->
+  <!-- Firebase v11.6.1 Modular SDK (100% Cloud Firestore Sync — Zero Local Storage) -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import {
       getAuth,
-      signInAnonymously,
       signInWithCustomToken,
       onAuthStateChanged,
       GoogleAuthProvider,
@@ -5087,10 +5095,21 @@
     };
 
     const CHUNK_SIZE = 500; // 500 words per Firestore doc => 20,000 words = only 40 docs!
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'hanyu-bu-tai-nan';
+    const LEGACY_APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'hanyu-bu-tai-nan';
+
+    function sanitizeFirestoreData(data) {
+      return JSON.parse(JSON.stringify(data));
+    }
 
     function mapFirebaseErrorVi(err) {
-      const code = err?.code || '';
+      const code = String(err?.code || '');
+      const msg = String(err?.message || '');
+      if (code.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
+        return 'Lỗi phân quyền Firestore (permission-denied): Hãy mở Firebase Console → Firestore Database → Rules và cấp quyền read/write cho user đăng nhập.';
+      }
+      if (code.includes('not-found') || code.includes('failed-precondition') || msg.includes('does not exist')) {
+        return 'Chưa tạo Firestore Database trong dự án Firebase. Hãy vào Build → Firestore Database → Create database.';
+      }
       if (code.includes('invalid-credential') || code.includes('wrong-password') || code.includes('user-not-found')) {
         return 'Email hoặc mật khẩu chưa chính xác. Vui lòng kiểm tra lại!';
       }
@@ -5109,10 +5128,10 @@
       if (code.includes('unauthorized-domain')) {
         return 'Tên miền hiện tại chưa được cấp phép trong Firebase Authentication (Authorized domains).';
       }
-      if (code.includes('network-request-failed')) {
-        return 'Lỗi kết nối mạng. Dữ liệu vẫn được lưu an toàn trên máy của bạn.';
+      if (code.includes('network-request-failed') || code.includes('unavailable')) {
+        return 'Mất kết nối mạng tới máy chủ Firebase. Vui lòng kiểm tra Internet và thử lại.';
       }
-      return `Lỗi xác thực: ${err?.message || 'Không xác định'}`;
+      return `Lỗi Firebase (${code || 'unknown'}): ${msg || 'Không xác định'}`;
     }
 
     const CloudSync = {
@@ -5121,6 +5140,7 @@
       db: null,
       user: null,
       syncStatus: 'local', // 'local' | 'syncing' | 'synced' | 'error'
+      lastErrorMsg: '',
       syncTimer: null,
       lastChunkCount: 0,
       initialized: false,
@@ -5129,8 +5149,9 @@
         return Boolean(this.user && !this.user.isAnonymous);
       },
 
-      setStatus(status) {
+      setStatus(status, errorMsg = '') {
         this.syncStatus = status;
+        this.lastErrorMsg = errorMsg;
         if (typeof updateAuthUI === 'function') updateAuthUI();
       },
 
@@ -5140,12 +5161,6 @@
           if (!config && typeof __firebase_config !== 'undefined' && __firebase_config) {
             config = JSON.parse(__firebase_config);
           }
-          if (!config && typeof HanyuDB !== 'undefined') {
-            const meta = await HanyuDB.getAll('meta');
-            const savedCfg = meta.find(m => m.key === 'custom_firebase_config');
-            if (savedCfg && savedCfg.value) config = savedCfg.value;
-          }
-
           if (!config) {
             config = DEFAULT_FIREBASE_CONFIG;
           }
@@ -5159,18 +5174,22 @@
           this.auth = getAuth(this.app);
           this.db = getFirestore(this.app);
 
-          // Listen for auth state changes
           onAuthStateChanged(this.auth, async (user) => {
             this.user = user;
             if (this.isSignedIn()) {
               updateAuthUI();
-              await this.pullOrMergeFromCloud(user);
+              await this.pullFromCloud(user);
             } else {
+              // Not signed in -> clear in-memory data (zero local storage)
+              AppState.folders = [];
+              AppState.words = [];
+              updateSidebarCounters();
               this.setStatus('local');
+              navigate(AppState.currentRoute);
+              openAuthModal();
             }
           });
 
-          // RULE 3: Authenticate with custom token first if provided by environment
           if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
             await signInWithCustomToken(this.auth, __initial_auth_token);
           }
@@ -5178,13 +5197,13 @@
           this.initialized = true;
         } catch (err) {
           console.warn('Firebase init warning:', err);
-          this.setStatus('local');
+          this.setStatus('error', mapFirebaseErrorVi(err));
         }
       },
 
       ensureReady() {
         if (!this.auth || !this.db) {
-          showAuthError('Chưa kết nối được dự án Firebase. Hãy mở mục "Cấu hình Firebase cá nhân" bên dưới để dán firebaseConfig của bạn.');
+          showAuthError('Chưa kết nối được dự án Firebase. Hãy mở mục cấu hình bên dưới để kiểm tra firebaseConfig.');
           const det = document.getElementById('firebase-config-details');
           if (det) det.open = true;
           return false;
@@ -5199,7 +5218,7 @@
           const provider = new GoogleAuthProvider();
           await signInWithPopup(this.auth, provider);
           closeModal('auth-modal');
-          showToast('Đăng nhập Google thành công! Đang đồng bộ dữ liệu...', 'success');
+          showToast('Đăng nhập Google thành công! Đang tải dữ liệu từ Cloud...', 'success');
         } catch (err) {
           showAuthError(mapFirebaseErrorVi(err));
         }
@@ -5211,7 +5230,7 @@
         try {
           await signInWithEmailAndPassword(this.auth, email, password);
           closeModal('auth-modal');
-          showToast('Đăng nhập thành công! Đang đồng bộ Cloud...', 'success');
+          showToast('Đăng nhập thành công! Đang tải dữ liệu từ Cloud...', 'success');
         } catch (err) {
           showAuthError(mapFirebaseErrorVi(err));
         }
@@ -5228,7 +5247,7 @@
           this.user = cred.user;
           updateAuthUI();
           closeModal('auth-modal');
-          showToast('Tạo tài khoản thành công! Đang tải kho từ lên Cloud...', 'success');
+          showToast('Tạo tài khoản thành công! Đang khởi tạo kho từ trên Cloud...', 'success');
         } catch (err) {
           showAuthError(mapFirebaseErrorVi(err));
         }
@@ -5240,10 +5259,14 @@
           if (this.syncTimer) clearTimeout(this.syncTimer);
           await signOut(this.auth);
           this.user = null;
+          AppState.folders = [];
+          AppState.words = [];
+          HanyuDB.mem = { folders: [], words: [], meta: [] };
+          updateSidebarCounters();
           this.setStatus('local');
           closeModal('auth-modal');
-          if (AppState.currentRoute === 'dashboard') renderDashboard();
-          showToast('Đã đăng xuất. Dữ liệu vẫn được giữ trên máy này.', 'info');
+          navigate('dashboard');
+          showToast('Đã đăng xuất và xóa sạch bộ nhớ tạm trên máy.', 'info');
         } catch (err) {
           showToast('Không thể đăng xuất lúc này.', 'error');
         }
@@ -5255,28 +5278,47 @@
         if (this.syncTimer) clearTimeout(this.syncTimer);
         this.syncTimer = setTimeout(() => {
           this.pushAllToCloud(false);
-        }, 1500);
+        }, 1200);
       },
 
-      async pullOrMergeFromCloud(user) {
+      async pullFromCloud(user) {
         if (!user || !this.db) return;
         this.setStatus('syncing');
         try {
-          // RULE 1 Strict Path: /artifacts/{appId}/users/{userId}/profile/main
-          const profileRef = doc(this.db, 'artifacts', appId, 'users', user.uid, 'profile', 'main');
-          const profileSnap = await getDoc(profileRef);
+          // Primary clean path: /users/{uid}/profile/main & /users/{uid}/vocab_chunks
+          let profileRef = doc(this.db, 'users', user.uid, 'profile', 'main');
+          let profileSnap = await getDoc(profileRef);
+          let chunksCol = collection(this.db, 'users', user.uid, 'vocab_chunks');
+          let chunksSnap = await getDocs(chunksCol);
 
-          // RULE 1 & RULE 2: Simple collection fetch without orderBy/where/limit
-          const chunksCol = collection(this.db, 'artifacts', appId, 'users', user.uid, 'vocab_chunks');
-          const chunksSnap = await getDocs(chunksCol);
+          // Automatic fallback check for legacy /artifacts/{appId}/users/{uid}/... path
+          if (!profileSnap.exists() && chunksSnap.empty) {
+            try {
+              const legacyProfileRef = doc(this.db, 'artifacts', LEGACY_APP_ID, 'users', user.uid, 'profile', 'main');
+              const legacyProfileSnap = await getDoc(legacyProfileRef);
+              const legacyChunksCol = collection(this.db, 'artifacts', LEGACY_APP_ID, 'users', user.uid, 'vocab_chunks');
+              const legacyChunksSnap = await getDocs(legacyChunksCol);
+              if (legacyProfileSnap.exists() || !legacyChunksSnap.empty) {
+                profileSnap = legacyProfileSnap;
+                chunksSnap = legacyChunksSnap;
+              }
+            } catch (legacyErr) {
+              // Ignore legacy path permission error if rules only allow /users/{uid}
+            }
+          }
 
           const hasCloudProfile = profileSnap.exists();
           const hasCloudChunks = !chunksSnap.empty;
 
-          // Brand new Cloud account -> push local data up immediately
+          // Brand new Cloud account -> initialize starter 3 levels + 45 words directly on Cloud
           if (!hasCloudProfile && !hasCloudChunks) {
+            const starter = buildStarterLibrary();
+            AppState.folders = starter.folders;
+            AppState.words = starter.words;
             await this.pushAllToCloud(false);
-            showToast('Đã sao lưu từ vựng & tiến độ trên máy lên Cloud!', 'success');
+            updateSidebarCounters();
+            navigate(AppState.currentRoute);
+            showToast('☁️ Đã khởi tạo 45 từ mẫu HSK trên tài khoản Cloud của bạn!', 'success');
             return;
           }
 
@@ -5291,70 +5333,34 @@
 
           const cloudData = hasCloudProfile ? profileSnap.data() : {};
 
-          // Merge folders (Cloud priority + any unique local folders)
-          if (Array.isArray(cloudData.folders) && cloudData.folders.length > 0) {
-            const folderMap = new Map(cloudData.folders.map(f => [f.id, f]));
-            AppState.folders.forEach(localF => {
-              if (!folderMap.has(localF.id)) folderMap.set(localF.id, localF);
-            });
-            AppState.folders = Array.from(folderMap.values());
-            await HanyuDB.putMany('folders', AppState.folders);
-          }
+          AppState.folders = Array.isArray(cloudData.folders) && cloudData.folders.length > 0
+            ? cloudData.folders
+            : STARTER_FOLDERS.map(f => ({ ...f }));
+          AppState.words = cloudWords;
 
-          // Merge words (Cloud priority + any unique user-added local words)
-          if (cloudWords.length > 0) {
-            const wordMap = new Map(cloudWords.map(w => [w.id, w]));
-            const cloudHanziSet = new Set(cloudWords.map(w => `${w.folderId}::${w.hanzi}`));
-            let addedLocalWords = 0;
+          if (typeof cloudData.coins === 'number') AppState.settings.coins = cloudData.coins;
+          if (typeof cloudData.streak === 'number') AppState.settings.streak = cloudData.streak;
+          if (typeof cloudData.dailyGoal === 'number') AppState.settings.dailyGoal = cloudData.dailyGoal;
+          if (Array.isArray(cloudData.weekActivity)) AppState.settings.weekActivity = cloudData.weekActivity;
+          if (cloudData.voiceMode) AppState.settings.voiceMode = cloudData.voiceMode;
+          if (typeof cloudData.speechRate === 'number') AppState.settings.speechRate = cloudData.speechRate;
+          if (cloudData.accentColor) AppState.settings.accentColor = cloudData.accentColor;
+          if (typeof cloudData.darkMode === 'boolean') AppState.settings.darkMode = cloudData.darkMode;
 
-            AppState.words.forEach(localW => {
-              // Skip default starter words if Cloud already has its own library
-              const isStarter = localW.id.startsWith('w_init_');
-              if (!isStarter && !wordMap.has(localW.id) && !cloudHanziSet.has(`${localW.folderId}::${localW.hanzi}`)) {
-                wordMap.set(localW.id, localW);
-                addedLocalWords++;
-              }
-            });
-
-            AppState.words = Array.from(wordMap.values());
-            await HanyuDB.putMany('words', AppState.words);
-
-            if (addedLocalWords > 0) {
-              await this.pushAllToCloud(false);
-            }
-          } else if (AppState.words.length > 0) {
-            await this.pushAllToCloud(false);
-          }
-
-          // Merge progress metrics (keep highest coins & streak)
-          if (typeof cloudData.coins === 'number') {
-            AppState.settings.coins = Math.max(AppState.settings.coins, cloudData.coins);
-          }
-          if (typeof cloudData.streak === 'number') {
-            AppState.settings.streak = Math.max(AppState.settings.streak, cloudData.streak);
-          }
-          if (typeof cloudData.dailyGoal === 'number') {
-            AppState.settings.dailyGoal = cloudData.dailyGoal;
-          }
-          if (Array.isArray(cloudData.weekActivity)) {
-            AppState.settings.weekActivity = AppState.settings.weekActivity.map((v, i) => Boolean(v || cloudData.weekActivity[i]));
-          }
-
-          await HanyuDB.putItem('meta', { key: 'settings', value: AppState.settings });
-
+          applyThemeSettings();
           updateSidebarCounters();
           this.setStatus('synced');
           navigate(AppState.currentRoute);
-          showToast(`☁️ Đã tải ${AppState.words.length.toLocaleString('vi-VN')} từ vựng từ Cloud!`, 'success');
+          showToast(`☁️ Đã tải ${AppState.words.length.toLocaleString('vi-VN')} từ vựng từ Firebase Cloud!`, 'success');
         } catch (err) {
           console.error('Cloud pull error:', err);
-          this.setStatus('error');
-          showToast('Không thể tải dữ liệu từ Cloud. Đang dùng bản lưu cục bộ.', 'warning');
+          const friendlyMsg = mapFirebaseErrorVi(err);
+          this.setStatus('error', friendlyMsg);
+          showToast(friendlyMsg, 'error');
         }
       },
 
       async pushAllToCloud(showNotify = false) {
-        // RULE 3: Guard every Firestore operation with auth check
         if (!this.auth || !this.auth.currentUser || !this.isSignedIn() || !this.db) {
           if (showNotify) openAuthModal();
           return;
@@ -5367,37 +5373,43 @@
           const totalWords = AppState.words.length;
           const totalChunks = Math.ceil(totalWords / CHUNK_SIZE);
 
-          // 1. Save profile, progress & folder structure
-          const profileRef = doc(this.db, 'artifacts', appId, 'users', uid, 'profile', 'main');
-          await setDoc(profileRef, {
-            coins: AppState.settings.coins,
-            streak: AppState.settings.streak,
-            lastStudyDate: AppState.settings.todayDate,
-            todayCount: AppState.settings.todayCount,
-            dailyGoal: AppState.settings.dailyGoal,
-            weekActivity: AppState.settings.weekActivity,
-            folders: AppState.folders,
+          // 1. Save profile, progress & folder structure to /users/{uid}/profile/main
+          const profileRef = doc(this.db, 'users', uid, 'profile', 'main');
+          await setDoc(profileRef, sanitizeFirestoreData({
+            email: this.auth.currentUser.email || '',
+            displayName: this.auth.currentUser.displayName || '',
+            coins: AppState.settings.coins || 0,
+            streak: AppState.settings.streak || 1,
+            lastStudyDate: AppState.settings.todayDate || '',
+            todayCount: AppState.settings.todayCount || 0,
+            dailyGoal: AppState.settings.dailyGoal || 20,
+            weekActivity: AppState.settings.weekActivity || [true, false, false, false, false, false, false],
+            voiceMode: AppState.settings.voiceMode || 'hd_youdao',
+            speechRate: AppState.settings.speechRate || 1.0,
+            accentColor: AppState.settings.accentColor || 'jade',
+            darkMode: Boolean(AppState.settings.darkMode),
+            folders: AppState.folders || [],
             totalWords,
             totalChunks,
             updatedAt: Date.now()
-          });
+          }));
 
-          // 2. Chunk vocabulary into 500-word packets (20,000 words = 40 docs max)
+          // 2. Chunk vocabulary into 500-word packets under /users/{uid}/vocab_chunks/chunk_{i}
           for (let i = 0; i < totalChunks; i++) {
             const slice = AppState.words.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-            const chunkRef = doc(this.db, 'artifacts', appId, 'users', uid, 'vocab_chunks', `chunk_${i}`);
-            await setDoc(chunkRef, {
+            const chunkRef = doc(this.db, 'users', uid, 'vocab_chunks', `chunk_${i}`);
+            await setDoc(chunkRef, sanitizeFirestoreData({
               index: i,
               count: slice.length,
               words: slice,
               updatedAt: Date.now()
-            });
+            }));
           }
 
           // 3. Clean up stale trailing chunk docs if vocabulary count decreased
           if (this.lastChunkCount > totalChunks) {
             for (let j = totalChunks; j < this.lastChunkCount; j++) {
-              const oldChunkRef = doc(this.db, 'artifacts', appId, 'users', uid, 'vocab_chunks', `chunk_${j}`);
+              const oldChunkRef = doc(this.db, 'users', uid, 'vocab_chunks', `chunk_${j}`);
               await deleteDoc(oldChunkRef);
             }
           }
@@ -5409,10 +5421,10 @@
           }
         } catch (err) {
           console.error('Cloud push error:', err);
-          this.setStatus('error');
-          if (showNotify) {
-            showToast('Lỗi đồng bộ lên Cloud. Dữ liệu vẫn an toàn trên máy.', 'error');
-          }
+          const friendlyMsg = mapFirebaseErrorVi(err);
+          this.setStatus('error', friendlyMsg);
+          showToast(friendlyMsg, 'error');
+          openAuthModal();
         }
       }
     };
